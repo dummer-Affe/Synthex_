@@ -652,12 +652,16 @@ abstract class _LiveInterpreterViewModelBase with Store {
       return;
     }
 
-    final bool isRecoverableTimeout = error.errorMsg.contains('speech_timeout') ||
+    final bool isRecoverableTimeout =
+        error.errorMsg.contains('speech_timeout') ||
         error.errorMsg.contains('error_no_match');
 
     // In hands-free mode, timeouts and no-match errors are expected between
     // phrases. Keep the session alive so _queueHandsFreeRestart can re-listen.
-    if (handsFreeMode && _keepListening && isSessionActive && isRecoverableTimeout) {
+    if (handsFreeMode &&
+        _keepListening &&
+        isSessionActive &&
+        isRecoverableTimeout) {
       // Don't show transient timeout noise to the user in hands-free mode.
       return;
     }
@@ -678,10 +682,6 @@ abstract class _LiveInterpreterViewModelBase with Store {
     if (_isDisposed) {
       return;
     }
-
-    runInAction(() {
-      soundLevel = level.isFinite ? level.abs() : 0;
-    });
   }
 
   void _handleSpeechResult(SpeechRecognitionResult result) {

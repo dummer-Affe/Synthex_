@@ -123,6 +123,17 @@ abstract class _LiveInterpreterViewModelBase with Store {
   @computed
   bool get hasTranscript => transcript.trim().isNotEmpty;
 
+  /// Whether the mic buttons should be enabled.
+  ///
+  /// False while the app is initialising services, downloading translation
+  /// models, or waiting for microphone permission.
+  @computed
+  bool get canStartListening =>
+      nativeFeaturesSupported &&
+      !isInitializing &&
+      !isPreparingModels &&
+      micPermissionGranted;
+
   @computed
   String get modelStatusLabel {
     if (isPreparingModels) {
@@ -570,11 +581,18 @@ abstract class _LiveInterpreterViewModelBase with Store {
           // Start VAD before TTS so it can detect real human speech.
           // The VAD uses hardware AEC — speaker echo is filtered out,
           // only a real voice triggers _handleVadSpeechDuringTts.
+          // If VAD fails to start (permission revoked, mic busy, etc.)
+          // we fall through and play TTS without interruption support.
           if (willSpeak) {
             _vadSpeechInterrupted = false;
-            await _vadService.startListening(
-              onSpeechDetected: _handleVadSpeechDuringTts,
-            );
+            try {
+              await _vadService.startListening(
+                onSpeechDetected: _handleVadSpeechDuringTts,
+              );
+            } catch (_) {
+              // VAD is optional — hands-free still works without it,
+              // the user just can't interrupt TTS by speaking.
+            }
           }
 
           // Translate without speaking — TTS is handled separately below
@@ -694,6 +712,18 @@ abstract class _LiveInterpreterViewModelBase with Store {
       errorText = '';
       statusText = _listeningStatusLabel();
     });
+
+    // Brief pause so the mic hardware finishes releasing from VAD
+    // before STT tries to acquire it.
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+
+    if (_isDisposed ||
+        !handsFreeMode ||
+        !_keepListening ||
+        !isSessionActive ||
+        activeSpeechLocale.isEmpty) {
+      return;
+    }
 
     await _startSpeechSession(
       localeId: activeSpeechLocale,
@@ -1151,7 +1181,7 @@ abstract class _LiveInterpreterViewModelBase with Store {
       }
 
       final DateTime completionDeadline = DateTime.now().add(
-        const Duration(seconds: 20),
+        const Duration(seconds: 60),
       );
       while (!_isDisposed &&
           isSpeaking &&
@@ -1160,6 +1190,7 @@ abstract class _LiveInterpreterViewModelBase with Store {
       }
 
       if (isSpeaking) {
+        await _textToSpeechService.stop();
         runInAction(() {
           isSpeaking = false;
         });
@@ -1277,11 +1308,23 @@ abstract class _LiveInterpreterViewModelBase with Store {
     _holdTurnFinalizing = false;
     _clearOnNextSpeechResult = false;
     _currentTurnHasSpeech = false;
+    _vadSpeechInterrupted = false;
     isSessionActive = false;
     _translationDebounce?.cancel();
 
     await _vadService.dispose();
-    await _speechService.stop();
+
+    // Try graceful stop first; fall back to cancel if it hangs.
+    try {
+      await _speechService.stop();
+    } catch (_) {
+      try {
+        await _speechService.cancel();
+      } catch (_) {
+        // Best-effort — the recognizer may already be released.
+      }
+    }
+
     await _textToSpeechService.stop();
     await _translationService.dispose();
   }

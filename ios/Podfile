@@ -60,6 +60,12 @@ post_install do |installer|
         '$(inherited)',
         'PERMISSION_MICROPHONE=1',
       ]
+
+      # Prevent Xcode from stripping ONNX Runtime symbols needed by the
+      # vad package.  Without this, TestFlight / Release builds crash with
+      # "Failed to lookup symbol 'OrtGetApiBase'".
+      config.build_settings['STRIP_INSTALLED_PRODUCT'] = 'NO'
+      config.build_settings['STRIP_STYLE'] = 'non-global'
     end
   end
 end

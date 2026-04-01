@@ -664,7 +664,20 @@ class _LiveInterpreterViewState extends State<LiveInterpreterView> {
 
   Widget _buildHoldButton(BuildContext context) {
     final bool isPressed = model.isSessionActive;
-    final bool isDisabled = !model.nativeFeaturesSupported;
+    final bool isDisabled = !model.canStartListening;
+
+    String buttonLabel;
+    if (isPressed) {
+      buttonLabel = 'RELEASE TO STOP';
+    } else if (model.isInitializing) {
+      buttonLabel = 'PREPARING NATIVE TOOLS';
+    } else if (model.isPreparingModels) {
+      buttonLabel = 'DOWNLOADING LANGUAGE MODEL';
+    } else if (!model.micPermissionGranted) {
+      buttonLabel = 'MIC PERMISSION REQUIRED';
+    } else {
+      buttonLabel = 'PRESS AND HOLD TO TALK';
+    }
 
     return Listener(
       onPointerDown: isDisabled
@@ -729,11 +742,7 @@ class _LiveInterpreterViewState extends State<LiveInterpreterView> {
               const SizedBox(width: 16),
               Flexible(
                 child: Text(
-                  isPressed
-                      ? 'RELEASE TO STOP'
-                      : (model.isInitializing
-                            ? 'PREPARING NATIVE TOOLS'
-                            : 'PRESS AND HOLD TO TALK'),
+                  buttonLabel,
                   textAlign: TextAlign.center,
                   style: _headlineStyle(context).copyWith(
                     color: AppColors.onPrimary,
@@ -752,7 +761,20 @@ class _LiveInterpreterViewState extends State<LiveInterpreterView> {
 
   Widget _buildHandsFreeButton(BuildContext context) {
     final bool isPressed = model.isSessionActive;
-    final bool isDisabled = !model.nativeFeaturesSupported;
+    final bool isDisabled = !model.canStartListening && !isPressed;
+
+    String buttonLabel;
+    if (isPressed) {
+      buttonLabel = 'STOP HANDS-FREE';
+    } else if (model.isInitializing) {
+      buttonLabel = 'PREPARING NATIVE TOOLS';
+    } else if (model.isPreparingModels) {
+      buttonLabel = 'DOWNLOADING LANGUAGE MODEL';
+    } else if (!model.micPermissionGranted) {
+      buttonLabel = 'MIC PERMISSION REQUIRED';
+    } else {
+      buttonLabel = 'START HANDS-FREE';
+    }
 
     return AnimatedOpacity(
       duration: const Duration(milliseconds: 160),
@@ -804,11 +826,7 @@ class _LiveInterpreterViewState extends State<LiveInterpreterView> {
                   const SizedBox(width: 16),
                   Flexible(
                     child: Text(
-                      isPressed
-                          ? 'STOP HANDS-FREE'
-                          : (model.isInitializing
-                                ? 'PREPARING NATIVE TOOLS'
-                                : 'START HANDS-FREE'),
+                      buttonLabel,
                       textAlign: TextAlign.center,
                       style: _headlineStyle(context).copyWith(
                         color: AppColors.onPrimary,

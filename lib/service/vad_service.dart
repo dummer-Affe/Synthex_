@@ -46,24 +46,35 @@ class VadService {
   }) async {
     if (_isListening) return;
 
-    _vadHandler = VadHandler.create(isDebug: false);
-
-    _speechSubscription = _vadHandler!.onRealSpeechStart.listen((_) {
-      onSpeechDetected();
-    });
-
-    await _vadHandler!.startListening(
-      positiveSpeechThreshold: 0.5,
-      negativeSpeechThreshold: 0.35,
-      redemptionFrames: 8,
-      minSpeechFrames: 3,
-      frameSamples: 1536,
-      preSpeechPadFrames: 1,
-      submitUserSpeechOnPause: false,
-      recordConfig: _recordConfig,
-    );
-
+    // Set flag synchronously BEFORE any async work so a second call
+    // arriving on the same event-loop turn is rejected immediately.
     _isListening = true;
+
+    try {
+      _vadHandler = VadHandler.create(isDebug: false);
+
+      _speechSubscription = _vadHandler!.onRealSpeechStart.listen((_) {
+        onSpeechDetected();
+      });
+
+      await _vadHandler!.startListening(
+        positiveSpeechThreshold: 0.5,
+        negativeSpeechThreshold: 0.35,
+        redemptionFrames: 8,
+        minSpeechFrames: 3,
+        frameSamples: 1536,
+        preSpeechPadFrames: 1,
+        submitUserSpeechOnPause: false,
+        recordConfig: _recordConfig,
+      );
+    } catch (error) {
+      // If start fails, clean up and re-throw so the caller knows.
+      _isListening = false;
+      await _speechSubscription?.cancel();
+      _speechSubscription = null;
+      _vadHandler = null;
+      rethrow;
+    }
   }
 
   Future<void> stopListening() async {
@@ -73,13 +84,21 @@ class VadService {
     await _speechSubscription?.cancel();
     _speechSubscription = null;
 
-    try {
-      await _vadHandler?.stopListening();
-    } catch (_) {
-      // Ignore errors during teardown.
-    }
-
+    final VadHandler? handler = _vadHandler;
     _vadHandler = null;
+
+    if (handler != null) {
+      try {
+        await handler.stopListening();
+      } catch (_) {
+        // Best-effort — the recorder may already be released.
+      }
+      try {
+        handler.dispose();
+      } catch (_) {
+        // Best-effort cleanup.
+      }
+    }
   }
 
   Future<void> dispose() async {

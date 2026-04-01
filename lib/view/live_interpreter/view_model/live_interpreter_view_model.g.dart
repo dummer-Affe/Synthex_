@@ -16,6 +16,13 @@ mixin _$LiveInterpreterViewModel on _LiveInterpreterViewModelBase, Store {
     () => super.hasTranscript,
     name: '_LiveInterpreterViewModelBase.hasTranscript',
   )).value;
+  Computed<bool>? _$canStartListeningComputed;
+
+  @override
+  bool get canStartListening => (_$canStartListeningComputed ??= Computed<bool>(
+    () => super.canStartListening,
+    name: '_LiveInterpreterViewModelBase.canStartListening',
+  )).value;
   Computed<String>? _$modelStatusLabelComputed;
 
   @override
@@ -562,6 +569,7 @@ micPermissionGranted: ${micPermissionGranted},
 nativeFeaturesSupported: ${nativeFeaturesSupported},
 soundLevel: ${soundLevel},
 hasTranscript: ${hasTranscript},
+canStartListening: ${canStartListening},
 modelStatusLabel: ${modelStatusLabel},
 speechLocaleLabel: ${speechLocaleLabel}
     ''';

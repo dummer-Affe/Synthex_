@@ -34,7 +34,7 @@ class NativeTextToSpeechService {
     if (defaultTargetPlatform == TargetPlatform.iOS) {
       await _flutterTts.setSharedInstance(true);
       await _flutterTts.setIosAudioCategory(
-        IosTextToSpeechAudioCategory.playback,
+        IosTextToSpeechAudioCategory.playAndRecord,
         <IosTextToSpeechAudioCategoryOptions>[
           IosTextToSpeechAudioCategoryOptions.defaultToSpeaker,
           IosTextToSpeechAudioCategoryOptions.allowBluetooth,

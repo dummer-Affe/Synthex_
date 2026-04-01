@@ -47,6 +47,7 @@ dependencies:
   google_mlkit_translation: ^0.13.1
   flutter_launcher_icons: ^0.14.3
   google_fonts: ^8.0.2
+  vad: ^0.0.7+1
 
 dev_dependencies:
   flutter_test:

@@ -10,6 +10,7 @@ import '../../../service/native_permission_service.dart';
 import '../../../service/native_speech_to_text_service.dart';
 import '../../../service/native_text_to_speech_service.dart';
 import '../../../service/native_translation_service.dart';
+import '../../../service/vad_service.dart';
 import '../model/language_option.dart';
 
 part 'live_interpreter_view_model.g.dart';
@@ -21,6 +22,7 @@ class LiveInterpreterViewModel extends _LiveInterpreterViewModelBase
     super.speechService,
     super.textToSpeechService,
     super.translationService,
+    super.vadService,
   });
 }
 
@@ -30,16 +32,19 @@ abstract class _LiveInterpreterViewModelBase with Store {
     NativeSpeechToTextService? speechService,
     NativeTextToSpeechService? textToSpeechService,
     NativeTranslationService? translationService,
+    VadService? vadService,
   }) : _permissionService = permissionService ?? NativePermissionService(),
        _speechService = speechService ?? NativeSpeechToTextService(),
        _textToSpeechService =
            textToSpeechService ?? NativeTextToSpeechService(),
-       _translationService = translationService ?? NativeTranslationService();
+       _translationService = translationService ?? NativeTranslationService(),
+       _vadService = vadService ?? VadService();
 
   final NativePermissionService _permissionService;
   final NativeSpeechToTextService _speechService;
   final NativeTextToSpeechService _textToSpeechService;
   final NativeTranslationService _translationService;
+  final VadService _vadService;
 
   final ObservableList<LanguageOption> supportedLanguages =
       ObservableList<LanguageOption>.of(LanguageOption.supportedLanguages);
@@ -58,7 +63,7 @@ abstract class _LiveInterpreterViewModelBase with Store {
   bool _useOnDeviceSpeech = true;
   String _committedTranscript = '';
   String _liveTranscript = '';
-  DateTime? _postTtsRestartedAt;
+  bool _vadSpeechInterrupted = false;
   int _translationTicket = 0;
 
   @observable
@@ -389,8 +394,13 @@ abstract class _LiveInterpreterViewModelBase with Store {
     _holdTurnFinalizing = false;
     _clearOnNextSpeechResult = false;
     _currentTurnHasSpeech = false;
+    _vadSpeechInterrupted = false;
     isSessionActive = false;
     soundLevel = 0;
+
+    if (_vadService.isListening) {
+      await _vadService.stopListening();
+    }
 
     if (!isListening && !_speechService.isListening) {
       statusText = _idleStatusLabel();
@@ -532,6 +542,8 @@ abstract class _LiveInterpreterViewModelBase with Store {
     }
 
     _handsFreeTurnFinalizing = true;
+    _vadSpeechInterrupted = false;
+
     Future<void>(() async {
       try {
         final bool turnHasSpeech = _currentTurnHasSpeech;
@@ -552,7 +564,54 @@ abstract class _LiveInterpreterViewModelBase with Store {
         }
 
         if (turnHasSpeech && transcript.trim().isNotEmpty) {
-          await _flushTranslation(speakOnComplete: autoSpeakTranslation);
+          final bool willSpeak = autoSpeakTranslation;
+
+          // Start VAD before TTS so it can detect real human speech.
+          // The VAD uses hardware AEC — speaker echo is filtered out,
+          // only a real voice triggers _handleVadSpeechDuringTts.
+          if (willSpeak) {
+            _vadSpeechInterrupted = false;
+            await _vadService.startListening(
+              onSpeechDetected: _handleVadSpeechDuringTts,
+            );
+          }
+
+          // Translate without speaking — TTS is handled separately below
+          // so we can check for VAD interruption between the two steps.
+          await _flushTranslation(speakOnComplete: false);
+
+          if (_isDisposed ||
+              !handsFreeMode ||
+              !_keepListening ||
+              !isSessionActive ||
+              activeSpeechLocale.isEmpty) {
+            if (_vadService.isListening) {
+              await _vadService.stopListening();
+            }
+            return;
+          }
+
+          // User spoke during translation — skip TTS entirely.
+          if (_vadSpeechInterrupted) {
+            await _restartAfterVadInterrupt();
+            return;
+          }
+
+          // Play translation through TTS while VAD keeps listening.
+          if (willSpeak && translatedText.trim().isNotEmpty) {
+            await _speakAutoTranslation(translatedText);
+          }
+
+          // Stop VAD now that TTS is done (naturally or interrupted).
+          if (_vadService.isListening) {
+            await _vadService.stopListening();
+          }
+
+          // User spoke during TTS — clear and restart.
+          if (_vadSpeechInterrupted) {
+            await _restartAfterVadInterrupt();
+            return;
+          }
         } else if (turnHasSpeech) {
           _translationDebounce?.cancel();
           _translationTicket += 1;
@@ -566,27 +625,7 @@ abstract class _LiveInterpreterViewModelBase with Store {
           return;
         }
 
-        // Wait for TTS to finish before restarting the mic to avoid
-        // the spoken translation being picked up as echo transcription.
-        if (isSpeaking) {
-          final DateTime ttsDeadline = DateTime.now().add(
-            const Duration(seconds: 25),
-          );
-          while (!_isDisposed &&
-              isSpeaking &&
-              DateTime.now().isBefore(ttsDeadline)) {
-            await Future<void>.delayed(const Duration(milliseconds: 100));
-          }
-        }
-
-        if (_isDisposed ||
-            !handsFreeMode ||
-            !_keepListening ||
-            !isSessionActive ||
-            activeSpeechLocale.isEmpty) {
-          return;
-        }
-
+        // TTS completed naturally — prepare for the next turn.
         if (turnHasSpeech) {
           _clearOnNextSpeechResult = hadTurnContent;
         }
@@ -596,19 +635,14 @@ abstract class _LiveInterpreterViewModelBase with Store {
           statusText = _sessionWaitingStatusLabel();
         });
 
-        await Future<void>.delayed(const Duration(milliseconds: 650));
+        // Short pause before restarting the mic.
+        await Future<void>.delayed(const Duration(milliseconds: 200));
         if (_isDisposed ||
             !handsFreeMode ||
             !_keepListening ||
             !isSessionActive ||
             activeSpeechLocale.isEmpty) {
           return;
-        }
-
-        // Mark the moment the mic restarts after auto-TTS so the echo
-        // blanking window in _handleSpeechResult can filter room echo.
-        if (turnHasSpeech && autoSpeakTranslation) {
-          _postTtsRestartedAt = DateTime.now();
         }
 
         await _startSpeechSession(
@@ -619,6 +653,46 @@ abstract class _LiveInterpreterViewModelBase with Store {
         _handsFreeTurnFinalizing = false;
       }
     });
+  }
+
+  /// Called by VAD when real human speech is detected during TTS playback.
+  void _handleVadSpeechDuringTts() {
+    if (_isDisposed || !handsFreeMode || !_keepListening) return;
+    _vadSpeechInterrupted = true;
+    unawaited(_textToSpeechService.stop());
+  }
+
+  /// Clear state and restart STT after the user interrupted TTS by speaking.
+  Future<void> _restartAfterVadInterrupt() async {
+    if (_vadService.isListening) {
+      await _vadService.stopListening();
+    }
+
+    _resetForNewTurn(clearError: true);
+    _clearOnNextSpeechResult = false;
+    _currentTurnHasSpeech = false;
+
+    runInAction(() {
+      errorText = '';
+      statusText = _listeningStatusLabel();
+    });
+
+    // Small delay so the VAD recorder fully releases the mic before STT
+    // grabs it.
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+
+    if (_isDisposed ||
+        !handsFreeMode ||
+        !_keepListening ||
+        !isSessionActive ||
+        activeSpeechLocale.isEmpty) {
+      return;
+    }
+
+    await _startSpeechSession(
+      localeId: activeSpeechLocale,
+      onDevice: _useOnDeviceSpeech,
+    );
   }
 
   void _queueRestart() {
@@ -691,10 +765,6 @@ abstract class _LiveInterpreterViewModelBase with Store {
 
     final String normalizedWords = _normalizeText(result.recognizedWords);
     if (normalizedWords.isEmpty) {
-      return;
-    }
-
-    if (_shouldIgnorePostTtsEcho()) {
       return;
     }
 
@@ -1093,27 +1163,6 @@ abstract class _LiveInterpreterViewModelBase with Store {
     }
   }
 
-  /// Time-based echo blanking: after TTS auto-plays and the mic restarts,
-  /// ignore all speech results for 1.2 s to let room echo die out.
-  /// This avoids the feedback loop where TTS output is transcribed as
-  /// gibberish (cross-language) and re-translated endlessly.
-  bool _shouldIgnorePostTtsEcho() {
-    if (!handsFreeMode ||
-        !_clearOnNextSpeechResult ||
-        _postTtsRestartedAt == null) {
-      return false;
-    }
-
-    final Duration elapsed = DateTime.now().difference(_postTtsRestartedAt!);
-    if (elapsed < const Duration(milliseconds: 1200)) {
-      return true;
-    }
-
-    // Blanking window expired — real speech from now on.
-    _postTtsRestartedAt = null;
-    return false;
-  }
-
   void _resetForNewTurn({bool clearError = false}) {
     _translationDebounce?.cancel();
     _translationTicket += 1;
@@ -1218,6 +1267,7 @@ abstract class _LiveInterpreterViewModelBase with Store {
     isSessionActive = false;
     _translationDebounce?.cancel();
 
+    await _vadService.dispose();
     await _speechService.stop();
     await _textToSpeechService.stop();
     await _translationService.dispose();

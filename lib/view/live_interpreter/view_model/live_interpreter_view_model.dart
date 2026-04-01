@@ -660,11 +660,16 @@ abstract class _LiveInterpreterViewModelBase with Store {
   void _handleVadSpeechDuringTts() {
     if (_isDisposed || !handsFreeMode || !_keepListening) return;
     _vadSpeechInterrupted = true;
+    // Stop TTS and release the mic from VAD in parallel so STT can start
+    // as soon as the main flow reaches _restartAfterVadInterrupt.
     unawaited(_textToSpeechService.stop());
+    unawaited(_vadService.stopListening());
   }
 
   /// Clear state and restart STT after the user interrupted TTS by speaking.
   Future<void> _restartAfterVadInterrupt() async {
+    // VAD stop was already kicked off in _handleVadSpeechDuringTts;
+    // await only if it hasn't finished yet.
     if (_vadService.isListening) {
       await _vadService.stopListening();
     }
@@ -678,9 +683,8 @@ abstract class _LiveInterpreterViewModelBase with Store {
       statusText = _listeningStatusLabel();
     });
 
-    // Small delay so the VAD recorder fully releases the mic before STT
-    // grabs it.
-    await Future<void>.delayed(const Duration(milliseconds: 150));
+    // Minimal pause for the mic hardware to fully release.
+    await Future<void>.delayed(const Duration(milliseconds: 80));
 
     if (_isDisposed ||
         !handsFreeMode ||

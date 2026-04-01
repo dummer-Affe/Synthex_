@@ -5,9 +5,9 @@ import 'package:vad/vad.dart';
 /// Lightweight wrapper around the Silero VAD package.
 ///
 /// Used in hands-free mode to detect real human speech while TTS is playing.
-/// The underlying [VadHandler] uses a [RecordConfig] with hardware AEC enabled
-/// by default, so audio played through the device speakers (TTS echo) is
-/// filtered out before it reaches the VAD model.
+/// A custom [RecordConfig] keeps the system audio mode in normal so that TTS
+/// playback quality is not degraded, while still using the
+/// `voiceCommunication` audio source on Android for hardware-level AEC.
 class VadService {
   VadHandler? _vadHandler;
   StreamSubscription<void>? _speechSubscription;
@@ -15,11 +15,32 @@ class VadService {
 
   bool get isListening => _isListening;
 
-  /// Begin listening for human voice activity.
+  /// [RecordConfig] tuned for coexistence with TTS playback.
   ///
-  /// [onSpeechDetected] fires once confirmed speech is detected (after
-  /// `minSpeechFrames` to avoid misfires). The callback is guaranteed to
-  /// run on the main isolate.
+  /// Key differences from the vad package default:
+  /// - [AudioManagerMode.modeNormal] keeps TTS routed through the main
+  ///   speaker at full quality (the default `modeInCommunication` reroutes
+  ///   audio to the earpiece and applies aggressive processing).
+  /// - `speakerphone: false` avoids forcing speaker routing changes.
+  /// - `autoGain` and `noiseSuppress` are off to prevent artifacts.
+  /// - `echoCancel` stays on; combined with `voiceCommunication` source,
+  ///   the HAL-level AEC still filters speaker echo.
+  static final RecordConfig _recordConfig = RecordConfig(
+    encoder: AudioEncoder.pcm16bits,
+    sampleRate: 16000,
+    bitRate: 16,
+    numChannels: 1,
+    echoCancel: true,
+    autoGain: false,
+    noiseSuppress: false,
+    androidConfig: AndroidRecordConfig(
+      audioSource: AndroidAudioSource.voiceCommunication,
+      audioManagerMode: AudioManagerMode.modeNormal,
+      speakerphone: false,
+      manageBluetooth: false,
+    ),
+  );
+
   Future<void> startListening({
     required VoidCallback onSpeechDetected,
   }) async {
@@ -39,12 +60,12 @@ class VadService {
       frameSamples: 1536,
       preSpeechPadFrames: 1,
       submitUserSpeechOnPause: false,
+      recordConfig: _recordConfig,
     );
 
     _isListening = true;
   }
 
-  /// Stop listening and release the microphone.
   Future<void> stopListening() async {
     if (!_isListening) return;
     _isListening = false;
@@ -61,7 +82,6 @@ class VadService {
     _vadHandler = null;
   }
 
-  /// Release all resources.
   Future<void> dispose() async {
     await stopListening();
   }

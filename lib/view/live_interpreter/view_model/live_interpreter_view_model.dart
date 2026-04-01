@@ -592,9 +592,9 @@ abstract class _LiveInterpreterViewModelBase with Store {
             return;
           }
 
-          // User spoke during translation — skip TTS entirely.
+          // User spoke during translation — _quickSwitchToStt already
+          // kicked off STT from the callback, just exit.
           if (_vadSpeechInterrupted) {
-            await _restartAfterVadInterrupt();
             return;
           }
 
@@ -603,14 +603,14 @@ abstract class _LiveInterpreterViewModelBase with Store {
             await _speakAutoTranslation(translatedText);
           }
 
-          // Stop VAD now that TTS is done (naturally or interrupted).
+          // Stop VAD now that TTS is done naturally.
           if (_vadService.isListening) {
             await _vadService.stopListening();
           }
 
-          // User spoke during TTS — clear and restart.
+          // User spoke during TTS — _quickSwitchToStt already
+          // kicked off STT from the callback, just exit.
           if (_vadSpeechInterrupted) {
-            await _restartAfterVadInterrupt();
             return;
           }
         } else if (turnHasSpeech) {
@@ -657,21 +657,33 @@ abstract class _LiveInterpreterViewModelBase with Store {
   }
 
   /// Called by VAD when real human speech is detected during TTS playback.
+  ///
+  /// Immediately stops TTS and begins switching from VAD to STT without
+  /// waiting for the [_queueHandsFreeRestart] flow to unwind. This
+  /// minimises the gap between the user starting to speak and STT
+  /// actually capturing their words.
   void _handleVadSpeechDuringTts() {
-    if (_isDisposed || !handsFreeMode || !_keepListening) return;
+    if (_isDisposed || !handsFreeMode || !_keepListening || _vadSpeechInterrupted) {
+      return;
+    }
     _vadSpeechInterrupted = true;
-    // Stop TTS and release the mic from VAD in parallel so STT can start
-    // as soon as the main flow reaches _restartAfterVadInterrupt.
     unawaited(_textToSpeechService.stop());
-    unawaited(_vadService.stopListening());
+    unawaited(_quickSwitchToStt());
   }
 
-  /// Clear state and restart STT after the user interrupted TTS by speaking.
-  Future<void> _restartAfterVadInterrupt() async {
-    // VAD stop was already kicked off in _handleVadSpeechDuringTts;
-    // await only if it hasn't finished yet.
-    if (_vadService.isListening) {
-      await _vadService.stopListening();
+  /// Stop VAD, clear state, and start STT as fast as possible.
+  ///
+  /// Runs independently of [_queueHandsFreeRestart] — when that flow
+  /// eventually checks [_vadSpeechInterrupted] it simply returns.
+  Future<void> _quickSwitchToStt() async {
+    await _vadService.stopListening();
+
+    if (_isDisposed ||
+        !handsFreeMode ||
+        !_keepListening ||
+        !isSessionActive ||
+        activeSpeechLocale.isEmpty) {
+      return;
     }
 
     _resetForNewTurn(clearError: true);
@@ -682,17 +694,6 @@ abstract class _LiveInterpreterViewModelBase with Store {
       errorText = '';
       statusText = _listeningStatusLabel();
     });
-
-    // Minimal pause for the mic hardware to fully release.
-    await Future<void>.delayed(const Duration(milliseconds: 80));
-
-    if (_isDisposed ||
-        !handsFreeMode ||
-        !_keepListening ||
-        !isSessionActive ||
-        activeSpeechLocale.isEmpty) {
-      return;
-    }
 
     await _startSpeechSession(
       localeId: activeSpeechLocale,

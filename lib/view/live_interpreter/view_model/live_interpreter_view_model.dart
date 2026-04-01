@@ -359,6 +359,7 @@ abstract class _LiveInterpreterViewModelBase with Store {
         onDevice: onDevice,
         onResult: _handleSpeechResult,
         pauseFor: _speechPauseDuration,
+        listenFor: _speechListenDuration,
         onSoundLevelChange: _handleSoundLevel,
       );
 
@@ -1254,7 +1255,14 @@ abstract class _LiveInterpreterViewModelBase with Store {
   }
 
   Duration get _speechPauseDuration =>
-      handsFreeMode ? const Duration(seconds: 2) : const Duration(seconds: 4);
+      handsFreeMode
+          ? const Duration(milliseconds: 3500)
+          : const Duration(seconds: 4);
+
+  Duration get _speechListenDuration =>
+      handsFreeMode
+          ? const Duration(seconds: 120)
+          : const Duration(seconds: 45);
 
   Future<void> dispose() async {
     _isDisposed = true;

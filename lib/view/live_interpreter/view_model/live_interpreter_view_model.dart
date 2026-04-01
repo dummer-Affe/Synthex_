@@ -762,17 +762,22 @@ abstract class _LiveInterpreterViewModelBase with Store {
       return;
     }
 
-    final bool isRecoverableTimeout =
-        error.errorMsg.contains('speech_timeout') ||
-        error.errorMsg.contains('error_no_match');
+    final String msg = error.errorMsg.toLowerCase();
+    final bool isRecoverableSilence =
+        msg.contains('speech_timeout') ||
+        msg.contains('error_no_match') ||
+        msg.contains('no speech') ||
+        msg.contains('no_speech') ||
+        msg.contains('1110');
 
-    // In hands-free mode, timeouts and no-match errors are expected between
-    // phrases. Keep the session alive so _queueHandsFreeRestart can re-listen.
+    // In hands-free mode, silence / no-match errors are expected between
+    // phrases.  Keep the session alive so _queueHandsFreeRestart can
+    // re-listen — even if the platform marks the error as "permanent"
+    // (iOS always does for kAFAssistantErrorDomain code 1110).
     if (handsFreeMode &&
         _keepListening &&
         isSessionActive &&
-        isRecoverableTimeout) {
-      // Don't show transient timeout noise to the user in hands-free mode.
+        isRecoverableSilence) {
       return;
     }
 

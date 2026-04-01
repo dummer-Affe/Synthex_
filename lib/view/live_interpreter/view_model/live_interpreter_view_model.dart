@@ -54,6 +54,7 @@ abstract class _LiveInterpreterViewModelBase with Store {
   bool _keepListening = false;
   bool _restartListeningWhileActive = false;
   bool _restartQueued = false;
+  bool _speechStartRetryQueued = false;
   bool _handsFreeTurnFinalizing = false;
   bool _holdTurnFinalizing = false;
   bool _clearOnNextSpeechResult = false;
@@ -286,6 +287,7 @@ abstract class _LiveInterpreterViewModelBase with Store {
     _keepListening = true;
     _restartListeningWhileActive = !handsFreeMode;
     _restartQueued = false;
+    _speechStartRetryQueued = false;
     _handsFreeTurnFinalizing = false;
     _holdTurnFinalizing = false;
     isSessionActive = true;
@@ -365,7 +367,7 @@ abstract class _LiveInterpreterViewModelBase with Store {
     activeSpeechLocale = localeId;
 
     try {
-      await _speechService.listen(
+      final bool started = await _speechService.listen(
         localeId: localeId,
         onDevice: onDevice,
         onResult: _handleSpeechResult,
@@ -378,6 +380,16 @@ abstract class _LiveInterpreterViewModelBase with Store {
         if (_speechService.isListening) {
           await _speechService.stop();
         }
+        return;
+      }
+
+      if (!started) {
+        runInAction(() {
+          isListening = false;
+          soundLevel = 0;
+          statusText = _sessionWaitingStatusLabel();
+        });
+        _queueSpeechStartRetry();
         return;
       }
 
@@ -402,6 +414,7 @@ abstract class _LiveInterpreterViewModelBase with Store {
     _keepListening = false;
     _restartListeningWhileActive = false;
     _restartQueued = false;
+    _speechStartRetryQueued = false;
     _handsFreeTurnFinalizing = false;
     _holdTurnFinalizing = false;
     _clearOnNextSpeechResult = false;
@@ -510,6 +523,7 @@ abstract class _LiveInterpreterViewModelBase with Store {
         isListening = true;
         statusText = _listeningStatusLabel();
       });
+      _speechStartRetryQueued = false;
       return;
     }
 
@@ -681,7 +695,10 @@ abstract class _LiveInterpreterViewModelBase with Store {
   /// minimises the gap between the user starting to speak and STT
   /// actually capturing their words.
   void _handleVadSpeechDuringTts() {
-    if (_isDisposed || !handsFreeMode || !_keepListening || _vadSpeechInterrupted) {
+    if (_isDisposed ||
+        !handsFreeMode ||
+        !_keepListening ||
+        _vadSpeechInterrupted) {
       return;
     }
     _vadSpeechInterrupted = true;
@@ -750,6 +767,36 @@ abstract class _LiveInterpreterViewModelBase with Store {
           activeSpeechLocale.isEmpty) {
         return;
       }
+      await _startSpeechSession(
+        localeId: activeSpeechLocale,
+        onDevice: _useOnDeviceSpeech,
+      );
+    });
+  }
+
+  void _queueSpeechStartRetry({
+    Duration delay = const Duration(milliseconds: 450),
+  }) {
+    if (_speechStartRetryQueued ||
+        _isDisposed ||
+        !_keepListening ||
+        !isSessionActive ||
+        activeSpeechLocale.isEmpty) {
+      return;
+    }
+
+    _speechStartRetryQueued = true;
+    Future<void>.delayed(delay, () async {
+      _speechStartRetryQueued = false;
+      if (_isDisposed ||
+          !_keepListening ||
+          !isSessionActive ||
+          activeSpeechLocale.isEmpty ||
+          isListening ||
+          _speechService.isListening) {
+        return;
+      }
+
       await _startSpeechSession(
         localeId: activeSpeechLocale,
         onDevice: _useOnDeviceSpeech,
@@ -1290,20 +1337,19 @@ abstract class _LiveInterpreterViewModelBase with Store {
     return 'Press and hold the mic button, then speak.';
   }
 
-  Duration get _speechPauseDuration =>
-      handsFreeMode
-          ? const Duration(milliseconds: 3500)
-          : const Duration(seconds: 4);
+  Duration get _speechPauseDuration => handsFreeMode
+      ? const Duration(milliseconds: 3500)
+      : const Duration(seconds: 4);
 
-  Duration get _speechListenDuration =>
-      handsFreeMode
-          ? const Duration(seconds: 120)
-          : const Duration(seconds: 45);
+  Duration get _speechListenDuration => handsFreeMode
+      ? const Duration(seconds: 120)
+      : const Duration(seconds: 45);
 
   Future<void> dispose() async {
     _isDisposed = true;
     _keepListening = false;
     _restartQueued = false;
+    _speechStartRetryQueued = false;
     _handsFreeTurnFinalizing = false;
     _holdTurnFinalizing = false;
     _clearOnNextSpeechResult = false;

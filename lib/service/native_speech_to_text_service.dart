@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:speech_to_text/speech_recognition_error.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
 class NativeSpeechSessionConfig {
@@ -15,10 +18,13 @@ class NativeSpeechToTextService {
     : _speechToText = speechToText ?? SpeechToText();
 
   final SpeechToText _speechToText;
+  SpeechErrorListener? _errorListener;
+  SpeechStatusListener? _statusListener;
 
   bool _initialized = false;
   List<LocaleName> _availableLocales = const <LocaleName>[];
   LocaleName? _systemLocale;
+  Completer<void>? _listenReadyCompleter;
 
   List<LocaleName> get availableLocales => _availableLocales;
   String? get systemLocaleId => _systemLocale?.localeId;
@@ -28,13 +34,16 @@ class NativeSpeechToTextService {
     SpeechErrorListener? onError,
     SpeechStatusListener? onStatus,
   }) async {
+    _errorListener = onError;
+    _statusListener = onStatus;
+
     if (_initialized && _speechToText.isAvailable) {
       return _speechToText.isAvailable;
     }
 
     final isAvailable = await _speechToText.initialize(
-      onError: onError,
-      onStatus: onStatus,
+      onError: _forwardError,
+      onStatus: _forwardStatus,
       finalTimeout: const Duration(milliseconds: 750),
       options: <SpeechConfigOption>[SpeechToText.androidNoBluetooth],
     );
@@ -92,7 +101,7 @@ class NativeSpeechToTextService {
     );
   }
 
-  Future<void> listen({
+  Future<bool> listen({
     required String localeId,
     required bool onDevice,
     required SpeechResultListener onResult,
@@ -100,6 +109,9 @@ class NativeSpeechToTextService {
     Duration listenFor = const Duration(seconds: 45),
     SpeechSoundLevelChange? onSoundLevelChange,
   }) async {
+    final Completer<void> listenReadyCompleter = Completer<void>();
+    _listenReadyCompleter = listenReadyCompleter;
+
     await _speechToText.listen(
       onResult: onResult,
       localeId: localeId,
@@ -110,9 +122,31 @@ class NativeSpeechToTextService {
         partialResults: true,
         onDevice: onDevice,
         listenMode: ListenMode.dictation,
-        cancelOnError: true,
+        cancelOnError: false,
       ),
     );
+
+    if (_speechToText.isListening) {
+      if (identical(_listenReadyCompleter, listenReadyCompleter)) {
+        _listenReadyCompleter = null;
+      }
+      return true;
+    }
+
+    try {
+      await listenReadyCompleter.future.timeout(
+        const Duration(milliseconds: 900),
+      );
+    } on TimeoutException {
+      // Some iOS no-match completions close slowly and reject the first
+      // re-arm request. The caller retries if listening never actually starts.
+    } finally {
+      if (identical(_listenReadyCompleter, listenReadyCompleter)) {
+        _listenReadyCompleter = null;
+      }
+    }
+
+    return _speechToText.isListening;
   }
 
   Future<void> stop() {
@@ -125,5 +159,20 @@ class NativeSpeechToTextService {
 
   String _normalizeLocaleId(String localeTag) {
     return localeTag.replaceAll('-', '_');
+  }
+
+  void _forwardError(SpeechRecognitionError error) {
+    _errorListener?.call(error);
+  }
+
+  void _forwardStatus(String status) {
+    final Completer<void>? listenReadyCompleter = _listenReadyCompleter;
+    if (status == SpeechToText.listeningStatus &&
+        listenReadyCompleter != null &&
+        !listenReadyCompleter.isCompleted) {
+      listenReadyCompleter.complete();
+    }
+
+    _statusListener?.call(status);
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:speech_to_text/speech_recognition_error.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:synthex/service/native_permission_service.dart';
@@ -139,13 +140,44 @@ void main() {
       expect(speechService.listenRequests.length, 2);
       expect(
         speechService.listenRequests.first.pauseFor,
-        const Duration(seconds: 2),
+        const Duration(milliseconds: 3500),
       );
       expect(
         model.statusText,
         'Hands-free listening on-device in $sourceLabel...',
       );
     });
+
+    test(
+      'hands-free mode retries when the first iOS no-match rearm does not start',
+      () async {
+        final FakeSpeechService speechService = FakeSpeechService(
+          systemLocaleId: 'en_US',
+        );
+        final LiveInterpreterViewModel model = LiveInterpreterViewModel(
+          permissionService: FakePermissionService(),
+          speechService: speechService,
+          textToSpeechService: FakeTextToSpeechService(),
+          translationService: FakeTranslationService(),
+        );
+
+        await model.init();
+        await model.setHandsFreeMode(true);
+        await model.startListening();
+
+        speechService.queuedListenResults.addAll(<bool>[false, true]);
+        speechService.emitStatus(SpeechToText.notListeningStatus);
+        speechService.emitError('error_no_match', permanent: true);
+        speechService.emitStatus(SpeechToText.doneStatus);
+
+        await Future<void>.delayed(const Duration(milliseconds: 1700));
+
+        expect(model.isSessionActive, isTrue);
+        expect(model.isListening, isTrue);
+        expect(model.errorText, isEmpty);
+        expect(speechService.listenRequests.length, 3);
+      },
+    );
 
     test(
       'hands-free mode auto-speaks the translated final result and rearms',
@@ -420,8 +452,10 @@ class FakeSpeechService extends NativeSpeechToTextService {
 
   final bool onDeviceSpeech;
   final List<FakeListenRequest> listenRequests = <FakeListenRequest>[];
+  final List<bool> queuedListenResults = <bool>[];
   int stopCalls = 0;
   bool _isListening = false;
+  SpeechErrorListener? _errorListener;
   SpeechStatusListener? _statusListener;
   SpeechResultListener? _resultListener;
 
@@ -433,6 +467,7 @@ class FakeSpeechService extends NativeSpeechToTextService {
     SpeechErrorListener? onError,
     SpeechStatusListener? onStatus,
   }) async {
+    _errorListener = onError;
     _statusListener = onStatus;
     return true;
   }
@@ -458,7 +493,7 @@ class FakeSpeechService extends NativeSpeechToTextService {
   }
 
   @override
-  Future<void> listen({
+  Future<bool> listen({
     required String localeId,
     required bool onDevice,
     required SpeechResultListener onResult,
@@ -474,8 +509,15 @@ class FakeSpeechService extends NativeSpeechToTextService {
         pauseFor: pauseFor,
       ),
     );
-    _isListening = true;
-    _statusListener?.call(SpeechToText.listeningStatus);
+    final bool shouldStart = queuedListenResults.isEmpty
+        ? true
+        : queuedListenResults.removeAt(0);
+    if (shouldStart) {
+      _isListening = true;
+      _statusListener?.call(SpeechToText.listeningStatus);
+    }
+
+    return shouldStart;
   }
 
   @override
@@ -500,6 +542,10 @@ class FakeSpeechService extends NativeSpeechToTextService {
         SpeechRecognitionWords(text, null, 0.92),
       ], finalResult),
     );
+  }
+
+  void emitError(String errorMsg, {required bool permanent}) {
+    _errorListener?.call(SpeechRecognitionError(errorMsg, permanent));
   }
 }
 

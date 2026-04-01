@@ -65,17 +65,27 @@ PODS:
     - nanopb/encode (= 3.30910.0)
   - nanopb/decode (3.30910.0)
   - nanopb/encode (3.30910.0)
+  - onnxruntime-c (1.22.0)
+  - onnxruntime-objc (1.22.0):
+    - onnxruntime-objc/Core (= 1.22.0)
+  - onnxruntime-objc/Core (1.22.0):
+    - onnxruntime-c (= 1.22.0)
   - path_provider_foundation (0.0.1):
     - Flutter
     - FlutterMacOS
   - permission_handler_apple (9.3.0):
     - Flutter
   - PromisesObjC (2.4.0)
+  - record_ios (1.2.0):
+    - Flutter
   - speech_to_text (7.2.0):
     - CwlCatchException
     - Flutter
     - FlutterMacOS
   - SSZipArchive (2.6.0)
+  - vad (0.0.6):
+    - Flutter
+    - onnxruntime-objc (= 1.22.0)
 
 DEPENDENCIES:
   - CwlCatchExceptionSupport (~> 2.2.1)
@@ -85,7 +95,9 @@ DEPENDENCIES:
   - google_mlkit_translation (from `.symlinks/plugins/google_mlkit_translation/ios`)
   - path_provider_foundation (from `.symlinks/plugins/path_provider_foundation/darwin`)
   - permission_handler_apple (from `.symlinks/plugins/permission_handler_apple/ios`)
+  - record_ios (from `.symlinks/plugins/record_ios/ios`)
   - speech_to_text (from `.symlinks/plugins/speech_to_text/darwin`)
+  - vad (from `.symlinks/plugins/vad/ios`)
 
 SPEC REPOS:
   trunk:
@@ -102,6 +114,8 @@ SPEC REPOS:
     - MLKitTranslate
     - MLKitVision
     - nanopb
+    - onnxruntime-c
+    - onnxruntime-objc
     - PromisesObjC
     - SSZipArchive
 
@@ -118,8 +132,12 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/path_provider_foundation/darwin"
   permission_handler_apple:
     :path: ".symlinks/plugins/permission_handler_apple/ios"
+  record_ios:
+    :path: ".symlinks/plugins/record_ios/ios"
   speech_to_text:
     :path: ".symlinks/plugins/speech_to_text/darwin"
+  vad:
+    :path: ".symlinks/plugins/vad/ios"
 
 SPEC CHECKSUMS:
   CwlCatchException: 7acc161b299a6de7f0a46a6ed741eae2c8b4d75a
@@ -139,12 +157,16 @@ SPEC CHECKSUMS:
   MLKitTranslate: fcb283a2cbaaa595e1cf1d3fedffcea2e97a1168
   MLKitVision: 39a5a812db83c4a0794445088e567f3631c11961
   nanopb: fad817b59e0457d11a5dfbde799381cd727c1275
+  onnxruntime-c: 7f778680e96145956c0a31945f260321eed2611a
+  onnxruntime-objc: 83d28b87525bd971259a66e153ea32b5d023de19
   path_provider_foundation: 0b743cbb62d8e47eab856f09262bb8c1ddcfe6ba
   permission_handler_apple: 9878588469a2b0d0fc1e048d9f43605f92e6cec2
   PromisesObjC: f5707f49cb48b9636751c5b2e7d227e43fba9f47
+  record_ios: 26294aaa39e4bb7665b0fef78bdc23d723b432f2
   speech_to_text: 87bf9298952e8d9073be1b6aade6d5758db5170c
   SSZipArchive: 8a6ee5677c8e304bebc109e39cf0da91ccef22ea
+  vad: adfd9a29558d39cffd94fead982ceb8347b6fb86
 
-PODFILE CHECKSUM: 1e137ab01b1ea77f54bdc4a4b5b61b46131af6a1
+PODFILE CHECKSUM: 3c43488dbd5dddcec72822b4605b0c9c982ac412
 
 COCOAPODS: 1.16.2

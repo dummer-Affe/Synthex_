@@ -17,7 +17,6 @@ class AppSettings extends GetxController {
 
   String? currentPage;
   int pageStackCount = 1;
-  bool isIos = true;
 
   BuildContext? get context => navigatorKey.currentContext;
   bool get canPop => pageStackCount > 1;
